@@ -1,0 +1,645 @@
+---
+title: "시계열 프로젝트"
+author: "김다영"
+date: "2022-12-07"
+output: word_document
+---
+# 데이터 로드
+```{r}
+silver=read.csv('C:/Users/ekdud/Desktop/22-2/시계열분석/project/silver.csv', header=T)
+silver$date=as.Date(silver$date, format='%Y-%m-%d')
+head(silver)
+```
+
+## A1. 기초통계 분석
+### 1. $P_{t}$, $r_{t}$, $IV_{t}$의 시도표
+$P_{t}$
+```{r}
+Pt=silver$price
+plot(Pt, main="Price", xlab="t", ylab="Pt", type="l")
+```
+$r_{t}$
+```{r}
+rt=diff(log(Pt))
+plot(rt, main="log return", xlab="t", ylab="return", type="l")
+```
+$IV_{t}$
+```{r}
+IVt=silver$volatility
+plot(IVt, main="Volatility", xlab="t", ylab="IVt", type="l")
+```
+### 2. $P_{t}$, $r_{t}$, $IV_{t}$ 기본 통계량 표 작성 (대표값, 산포, 비대칭성, 첨도, normality...)
+```{r}
+library(moments)
+library(ggplot2)
+options(scipen=100)
+```
+$P_{t}$
+```{r}
+mean(Pt) #평균
+sd(Pt) #표준편차
+length(Pt) #데이터 개수
+summary(Pt) #데이터 요약
+boxplot(Pt) #산포
+skewness(Pt) #비대칭도
+kurtosis(Pt) #첨도
+qqnorm(Pt); qqline(Pt) #normality
+```
+$r_{t}$
+```{r}
+mean(rt) #평균
+sd(rt) #표준편차
+length(rt) #데이터 개수
+summary(rt) #데이터 요약
+boxplot(rt) #산포
+skewness(rt) #비대칭도
+kurtosis(rt) #첨도
+qqnorm(rt);qqline(rt) #normality
+```
+$IV_{t}$
+```{r}
+mean(IVt) #평균
+sd(IVt) #표준편차
+length(IVt) #데이터 개수
+summary(IVt) #데이터 요약
+boxplot(IVt) #산포
+skewness(IVt) #비대칭도
+kurtosis(IVt) #첨도
+qqnorm(IVt);qqline(IVt) #normality
+```
+### 3. $P_{t}$, $r_{t}$, $IV_{t}$ 표본자기상관함수 (lag 250까지)
+$P_{t}$
+```{r}
+acf(Pt, lag=250, main="Sample ACF of Pt")
+```
+$r_{t}$
+```{r}
+acf(rt, lag=250, main="Sample ACF of rt")
+```
+$IV_{t}$
+```{r}
+acf(IVt, lag=250, main="Sample ACF of IVt")
+```
+
+## A2. 모형추정, 검진 및 예측
+```{r}
+library(fUnitRoots)
+library(forecast)
+```
+```{r}
+#Pt
+aic_Pt = c()
+bic_Pt = c()
+for(p in 0:10){
+  fit_Pt = Arima(Pt, order=c(p,0,0))
+  aic_Pt[p+1] = fit_Pt$aic
+  bic_Pt[p+1] = fit_Pt$bic
+}
+
+#rt
+aic_rt = c()
+bic_rt = c()
+for(p in 0:10){
+  fit_rt = Arima(rt, order=c(p,0,0))
+  aic_rt[p+1] = fit_rt$aic
+  bic_rt[p+1] = fit_rt$bic
+}
+
+#IVt
+aic_IVt = c()
+bic_IVt = c()
+for(p in 0:20){
+  fit_IVt = Arima(IVt, order=c(p,0,0))
+  aic_IVt[p+1] = fit_IVt$aic
+  bic_IVt[p+1] = fit_IVt$bic
+}
+```
+
+### 1. ADF 검정
+```{r}
+#Pt - 비정상
+plot(aic_Pt,xlab="p",ylab="AIC",type="b",main="Pt")
+which.min(aic_Pt) #p=2
+adfTest(Pt, type="c",lags=which.min(aic_Pt)-2)
+#rt - 정상
+plot(aic_rt,xlab="p",ylab="AIC",type="l",main="rt")
+which.min(aic_rt) #p=4
+adfTest(rt,type="nc",lags=which.min(aic_rt)-2)
+#IVt - 정상
+plot(aic_IVt,xlab="p",ylab="AIC",type="l",main="IVt")
+which.min(aic_IVt) #p=11
+adfTest(IVt,type="c",lags=which.min(aic_IVt)-2)
+```
+- 강의노트 4장 / 4장 단위근 검정 참고
+- $H_0 : \delta=0, H_1 : \delta<0$이고 Pt, rt, IVt에 세가지 경우 모두 해야함 (adfTest만 해도 됨, 그래프 필요없음)
+- p값 > 0.05 : $H_0 기각$ -> 확정적 추세 | 기각못하면 확률적 추세따름
+
+### 2. ARIMA 모델을 BIC 기준으로 identify하고 identied된 모형을 추정하고 추정식을 써라. 추정치의 표준오차도 명시하라.
+- 강의노트 6장 참고
+### 1) Pt
+```{r}
+## Pt
+which.min(bic_Pt) #p=2
+adfTest(Pt,type="c",lags=which.min(bic_Pt)-2)
+```
+- p-avlue가 0.05보다 큼 -> 귀무가설 기각안함(1번 참고), 확률적추세, 단위근 계열, 비정상
+- Arima(p,d,q)에서 d 결정 => d=1
+- 비정상계열이므로 차분(diff) 이용
+
+```{r}
+d_Pt = diff(Pt)
+d_Pt.bic = c()
+for(p in 0:10){
+  d_Pt.fit_Pt = Arima(d_Pt,order=c(p,0,0))
+  d_Pt.bic[p+1] = d_Pt.fit_Pt$bic
+}
+
+which.min(d_Pt.bic) #p=1
+Arima(d_Pt,order=c(which.min(d_Pt.bic)-1,0,0))
+```
+(1) 모형 추정
+
+
+(2) 추정식(4장 p.2)
+- $\phi_p(B)(1-B)^dZ_t=\theta_0+\theta_q(B)a_t$
+- 위 식에 p,d,q 대입
+
+(3) 표준오차
+- Arima 결과 확인(sigma^2)
+
+
+### 2) rt
+```{r}
+which.min(bic_rt) #p=0
+Arima(rt,order=c(which.min(bic_rt)-1,0,0))
+```
+
+### 3) IVt
+```{r}
+which.min(bic_IVt) #p=1
+Arima(IVt,order=c(which.min(bic_IVt)-1,0,0))
+```
+
+### 3. 모형 검진
+### 1) Pt
+```{r}
+arima_fit_Pt = Arima(d_Pt, order=c(which.min(d_Pt.bic)-1,0,0))
+acf(arima_fit_Pt$residuals)
+```
+- 7장 p.5~ 참고
+(1) 방법 1 : white noise인지 판단
+- white noise이면 추정모형 적절, 아니면 추정모형 부적절
+(white noise : 잔차가 정규분포, 평균 0, 일정한 분산, 독립, 상관관계 없음)
+
+(2) 방법 2 : 모형 검진
+- Ljung-Box 가설 : $H_0$: 데이터들이 독립적으로 분포(자기상관 0) 
+- 결과(나의 경우) : lag=12,18,24에서 기각이 되어 ARIMA(7,1,0)은 개선이 필요함. 나는 ARIMA(9,1,0) 넣으니깐 괜찮음
+
+### 2) rt
+```{r}
+arima_fit_rt = Arima(rt, order=c(which.min(bic_rt)-1,0,0))
+acf(arima_fit_rt$residuals)
+```
+
+### 3) IVt
+```{r}
+arima_fit_IVt = Arima(IVt, order=c(which.min(bic_IVt)-1,0,0))
+acf(arima_fit_IVt$residuals)
+```
+
+### 4. 각각에 대해 마지막 시점 T에서 일주일간 미래값을 예측하고 95% 예측 구간을 그리기
+### 1) Pt
+```{r}
+forecast(arima_fit_Pt,h=5) # 예측치
+plot(forecast(arima_fit_Pt,h=5,level=c(95)),xlim=c(length(Pt)-22,length(Pt)+5))
+```
+### 2) rt
+```{r}
+forecast(arima_fit_rt,h=5) # 예측치
+plot(forecast(arima_fit_rt,h=5,level=c(95)),xlim=c(length(rt)-22,length(rt)+5))
+```
+### 3) IVt
+```{r}
+forecast(arima_fit_IVt,h=5) # 예측치
+plot(forecast(arima_fit_IVt,h=5,level=c(95)),xlim=c(length(IVt)-22,length(IVt)+5))
+```
+
+## A.3 out-of-sample 비교
+rt에 대해 AIC order AR 모형과 BIC order AR 모형의 예측력을 비교하라.
+### 1. 전체데이터 중 앞부분 85%를 이용하여 AIC order AR 모형과 BIC order AR 모형을 추정하라.
+```{r}
+#전체데이터중 앞부분 85%
+idx_num = round(length(rt)*0.85)
+new.rt = rt[1:idx_num]
+```
+
+```{r}
+#AIC
+library(forecast)
+aic=c()
+for(p in 0:10){
+  ar.fit=Arima(new.rt, order=c(p,0,0))
+  aic[p+1]=ar.fit$aic
+}
+plot(aic, type='l')
+which.min(aic) #p=2
+arima_aic_new.rt=Arima(new.rt, order=c(which.min(aic)-1,0,0))
+```
+```{r}
+#BIC
+library(forecast)
+bic=c()
+for(p in 0:10){
+  ar.fit=Arima(new.rt, order=c(p,0,0))
+  bic[p+1]=ar.fit$bic
+}
+plot(bic, type='l')
+which.min(bic) #p=0
+arima_bic_new.rt=Arima(new.rt, order=c(which.min(bic)-1,0,0))
+```
+
+### 2. 각 모형의 최근 15% 데이터의 1-step, 2-step, 3-step, 4-step, 5-step 예측치의 RMSE, MAE, MAPE 비교표를 작성하라. 단 데이터가 하나 추가될 때마다 모형의 추정을 갱신한다. 
+
+###유의사항: 1에서 얻은 p를 이용한 AR(p)로 사용하기
+```{r}
+n=length(rt)
+m=round(0.15*n)
+
+#AR(0) 적용
+#1-step
+e1.ar0=c()
+for(k in 1:m){
+  N=n-k
+  ar0=Arima(rt[1:N], order=c(0,0,0))
+  rt.hat.ar0=forecast(ar0, h=1)$mean[1]
+  e1.ar0[k]=rt[N+1]-rt.hat.ar0
+}
+```
+
+```{r}
+#AR(0) 적용
+#2-step
+e2.ar0=c()
+for(k in 1:m){
+  N=n-k
+  ar0=Arima(rt[1:(N-1)], order=c(0,0,0))
+  rt.hat.ar0=forecast(ar0, h=2)$mean
+  e2.1=rt[N]-rt.hat.ar0[1]
+  e2.2=rt[N+1]-rt.hat.ar0[2]
+  e2.ar0[k]=mean(e2.1, e2.2)
+}
+```
+
+```{r}
+#AR(0) 적용
+#3-step
+e3.ar0=c()
+for(k in 1:m){
+  N=n-k
+  ar0=Arima(rt[1:(N-2)], order=c(0,0,0))
+  rt.hat.ar0=forecast(ar0, h=3)$mean
+  e3.1=rt[(N-1)]-rt.hat.ar0[1]
+  e3.2=rt[N]-rt.hat.ar0[2]
+  e3.2=rt[N+1]-rt.hat.ar0[3]
+  e3.ar0[k]=mean(e3.1, e3.2, e3.2)
+}
+```
+
+```{r}
+#AR(0) 적용
+#4-step
+e4.ar0=c()
+for(k in 1:m){
+  N=n-k
+  ar0=Arima(rt[1:(N-3)], order=c(0,0,0))
+  rt.hat.ar0=forecast(ar0, h=4)$mean
+  e4.1=rt[(N-2)]-rt.hat.ar0[1]
+  e4.2=rt[(N-1)]-rt.hat.ar0[2]
+  e4.3=rt[N]-rt.hat.ar0[3]
+  e4.4=rt[N+1]-rt.hat.ar0[4]
+  e4.ar0[k]=mean(e4.1, e4.2, e4.3, e4.4)
+}
+```
+
+```{r}
+#AR(0) 적용
+#5-step
+e5.ar0=c()
+for(k in 1:m){
+  N=n-k
+  ar0=Arima(rt[1:(N-4)], order=c(0,0,0))
+  rt.hat.ar1=forecast(ar0, h=5)$mean
+  e5.1=rt[(N-3)]-rt.hat.ar0[1]
+  e5.2=rt[(N-2)]-rt.hat.ar0[2]
+  e5.3=rt[(N-1)]-rt.hat.ar0[3]
+  e5.4=rt[N]-rt.hat.ar0[4]
+  e5.5=rt[N+1]-rt.hat.ar0[5]
+  e5.ar0[k]=mean(e5.1, e5.2, e5.3, e5.4, e5.5)
+}
+```
+
+```{r}
+rt.test=c()
+for(k in 1:m){
+  N=n-k
+  rt.test[k]=rt[N+1]
+}
+
+rt.test[c(which((abs(e1.ar0)/rt.test)=='Inf'))]=0.0001
+
+result=list(RMSE=data.frame('step1'=sd(e1.ar0), 'step2'=sd(e2.ar0), 'step3'=sd(e3.ar0), 'step4'=sd(e4.ar0), 'step5'=sd(e5.ar0)), MAE=data.frame('step1'=mean(abs(e1.ar0)), 'step2'=mean(abs(e2.ar0)), 'step3'=mean(abs(e3.ar0)), 'step4'=mean(abs(e4.ar0)), 'step5'=mean(abs(e5.ar0))), MAPE=data.frame('step1'=100*mean(abs(e1.ar0)/rt.test), 'step2'=100*mean(abs(e2.ar0)/rt.test), 'step3'=100*mean(abs(e3.ar0)/rt.test), 'step4'=100*mean(abs(e4.ar0)/rt.test), 'step5'=100*mean(abs(e5.ar0)/rt.test)))
+print(result)
+```
+
+## A5. $r_{t}$에 대한 GARCH 모형 추정 및 $P_{t}$, $r_{t}$의 5%의 VaR
+### 1. $r_{t}$에 대해 AR(0)+GARCH(1,1), AR(0)+GJR-GARCH(1,1) 모형 추정 
+
+#### (1) AR(0)+GARCH(1,1) with 정규분포
+```{r}
+library(rugarch)
+spec.garch1 = ugarchspec(variance.model=list(model="sGARCH",garchOrder=c(1,1)), mean.model = list(armaOrder=c(0,0), include.mean=F), distribution.model="norm")
+a.t = rt-mean(rt)
+garch.fit1 = ugarchfit(data = a.t, spec=spec.garch1)
+garch.fit1
+```
+추정식: 
+
+#### (2) AR(0)+GARCH(1,1) with 표준화 t-분포
+```{r}
+spec.garch2 = ugarchspec(variance.model=list(model="sGARCH",garchOrder=c(1,1)), mean.model = list(armaOrder=c(0,0), include.mean=F), distribution.model="std")
+
+garch.fit2 = ugarchfit(data = a.t, spec=spec.garch2)
+garch.fit2
+```
+추정식:
+
+#### (3) AR(0)+GJR-GARCH(1,1) with 정규분포
+```{r}
+spec.garch3 = ugarchspec(variance.model=list(model="gjrGARCH",garchOrder=c(1,1)), mean.model = list(armaOrder=c(0,0), include.mean=F), distribution.model="norm")
+
+garch.fit3 = ugarchfit(data = a.t, spec=spec.garch3)
+garch.fit3
+```
+추정식: 
+
+#### 4) AR(0)+GJR-GARCH(1,1) with 표준화 t-분포
+```{r}
+spec.garch4 = ugarchspec(variance.model=list(model="gjrGARCH",garchOrder=c(1,1)), mean.model = list(armaOrder=c(0,0), include.mean=F), distribution.model="std")
+
+garch.fit4 = ugarchfit(data = a.t, spec=spec.garch4)
+garch.fit4
+```
+추정식:
+
+### 2. AR(0)+GRACH(1,1)으로부터 계산된 $\hat{\sigma_{t}}$ 의 시도표를 그리고 $r_{t}$, $IV_{t}$ 시도표와 비교
+AR(0)+GARCH(1,1) with 정규분포로부터 계산된 $\hat{\sigma_{t}}$
+```{r}
+sigma1 = sigma(garch.fit1)
+sigma1 = as.data.frame(sigma1)[,1]
+plot(sigma1, main=expression(paste(hat(sigma)[t]," with Normal")), xlab="t", ylab=expression(hat(sigma)[t]), type="l")
+```
+
+AR(0)+GARCH(1,1) with 표준화 t-분포로부터 계산된 $\hat{\sigma_{t}}$
+```{r}
+sigma2 = sigma(garch.fit2)
+sigma2 = as.data.frame(sigma2)[,1]
+plot(sigma2, main=expression(paste(hat(sigma)[t]," with T")), xlab="t", ylab=expression(hat(sigma)[t]), type="l")
+```
+$r_{t}$
+```{r}
+plot(rt, main="Log return", xlab="t", ylab="Return", type="l")
+```
+$IV_{t}$
+```{r}
+plot(IVt,main="Volatility",xlab="t", ylab="IVt", type="l")
+```
+
+### 3. $r_{T+1}$, $r_{T+2}$,..., $r_{T+5}$의 조건부 표준편차 $\sigma_{T+1}$, $\sigma_{T+2}$,..., $\sigma_{T+5}$의 예측치
+AR(0)+GARCH(1,1) with 정규분포 이용
+```{r}
+sigma.hat.for = ugarchforecast(garch.fit1, n.ahead=5)@forecast$sigmaFor
+sigma.hat.for[,]
+```
+#### 시도표(t = T-22,..., T+5만 포함)
+```{r}
+n=length(sigma1)
+sigma.hat=c(sigma1[c((n-22):n)],as.data.frame(sigma.hat.for)[,1])
+plot(sigma.hat, main=expression(paste(hat(sigma)[t]," forecast")),xlab="t = T-22, ..., T+5", ylab=expression(hat(sigma)[t]), type="l")
+```
+
+### 4. 4개 모형을 이용하여 $r_{T+1}$의 1%, 5% VaR 구하고 표로 작성
+#### (1) AR(0)+GARCH(1,1) with 정규분포
+```{r}
+library(forecast)
+ar.fit = Arima(rt, order=c(0,0,0))
+sigma.hat1 = ugarchforecast(garch.fit1, n.ahead=1)@forecast$sigmaFor[,]
+mu = as.numeric(ar.fit$coef[1])
+
+# 1%, 5% value at risk of return
+VaR1 = mu + qnorm(0.01)*sigma.hat1 
+VaR5 = mu + qnorm(0.05)*sigma.hat1
+VaR_norm = data.frame(quantile=c("1%", "5%"), GARCH_norm=c(VaR1, VaR5))
+```
+
+#### (2) AR(0)+GARCH(1,1) with 표준화 t-분포
+```{r}
+sigma.hat2 = ugarchforecast(garch.fit2, n.ahead=1)@forecast$sigmaFor[,]
+
+# 1%, 5% value at risk of return
+nu = 3.889596
+q.1 = sqrt(nu/(nu-2))*qt(0.01, nu)
+q.5 = sqrt(nu/(nu-2))*qt(0.05, nu)
+VaR1 = mu + q.1*sigma.hat2
+VaR5 = mu + q.5*sigma.hat2
+VaR_t = data.frame(quantile=c("1%", "5%"), GARCH_t=c(VaR1, VaR5))
+```
+
+#### (3) AR(0)+GJR-GARCH(1,1) with 정규분포
+```{r}
+sigma.hat3 = ugarchforecast(garch.fit3, n.ahead=1)@forecast$sigmaFor[,]
+
+# 1%, 5% value at risk of return
+VaR1 = mu + qnorm(0.01)*sigma.hat3 
+VaR5 = mu + qnorm(0.05)*sigma.hat3
+VaR_GJR_norm = data.frame(quantile=c("1%", "5%"), GJR_norm=c(VaR1, VaR5))
+VaR_GJR_norm
+```
+
+#### (4) AR(0)+GJR-GARCH(1,1) with 표준화 t-분포
+```{r}
+sigma.hat4 = ugarchforecast(garch.fit4, n.ahead=1)@forecast$sigmaFor[,]
+
+# 1%, 5% value at risk of return
+nu = 3.882090
+q.1 = sqrt(nu/(nu-2))*qt(0.01, nu)
+q.5 = sqrt(nu/(nu-2))*qt(0.05, nu)
+VaR1 = mu + q.1*sigma.hat4
+VaR5 = mu + q.5*sigma.hat4
+VaR_GJR_t = data.frame(quantile=c("1%", "5%"), GJR_t=c(VaR1, VaR5))
+VaR_GJR_t
+```
+#### $P_{T+1}$의 1%, 5% VaR 구하고 표로 작성 
+```{r}
+VaR_GARCH = merge(VaR_norm, VaR_t, by='quantile')
+VaR_GJR_GARCH = merge(VaR_GJR_norm, VaR_GJR_t, by='quantile')
+VaR = merge(VaR_GARCH, VaR_GJR_GARCH, by="quantile")
+VaR
+```
+#### 이 중 어느 모형의 VaR이 더 좋은지?
+$a_t$가 Normal을 따르는 AR(0)+GARCH(1,1)의 모형에서 VaR이 더 좋다. 
+
+## A6. Ps*는 GBM을 따른다고 가정
+### 1. 위 A1-1의 데이터를 이용하여 mu, sigma를 추정하라(단위를 명확히)
+```{r}
+rt=diff(log(Pt))
+
+#일별
+rt.mean=mean(rt)
+rt.sd=sd(rt)
+#연별
+mu1=rt.mean*250
+sigma1=rt.sd*sqrt(250)
+data.frame(mu1, sigma1)
+```
+
+### 2. $p_s^{*}=ln(P_s^{*})$라고 할 때, $p_s^{*}$가 만족하는 모형을 적어라. 모수값도 적어야 함.
+```{r}
+#로그수익률(year)
+mu2=(mu1-(sigma1^2)/2)
+sigma2=sigma1
+data.frame(mu2, sigma2)
+```
+분포식: $d\ln P_s=(\mu-\frac{\sigma^2}{2})dt+\sigma dw_t=-0.35068dt+0.2762085dw_t$
+
+### 3. 마지막 시점 T(대응되는 s 값은 S=T/250에서 조건부로 2년후의 미래값 $P_{S+2}^{*}$의 조건부 분포를 구하고 평균 분산을 구하시오.
+```{R}
+#가장 최근 가격= P0
+P0=silver[2549,2]
+P0 
+```
+```{r}
+#평균과 분산
+T=2; t=0
+exp.mu=P0*exp(mu1*(T-t))
+exp.var=(P0)^2*exp(2*mu1*(T-t))*(exp(sigma1^2*(T-t))-1) 
+data.frame(exp.mu, exp.var)
+```
+```{r}
+c(log(P0)+(mu1-sigma1^2/2)*(T-t), sigma1^2*(T-t))
+```
+분포식: $P_{S+2} \sim$ logNormal$(3.0024675, 0.1525823)$
+
+### 4. 마지막 시점 T(대응되는 s 값은 S=T/250에서 조건부로 향후 2년간의 미래 수익률 $r_{S+2}^{*}=\ln의 조건부 분포를 구하고, 평균과 분산을 구하시오
+```{r}
+T=2; t=0
+exp.rt.mu=mu2-(sigma2^2)/2
+exp.rt.var=sigma2^2/(T-t)
+data.frame(exp.rt.mu, exp.rt.var)
+```
+분포식: $r \sim$ N$(-0.112617, 0.03814557)$
+
+### 5. 이 자산의 마지막 가격 PT를 쓰시오. 또 만기 6개월, 행사가 PT인 European call option의 공정한 현재가를 구하시오
+```{r}
+#자산의 마지막 가격 PT
+PT=silver[2549,2]
+PT
+```
+```{r}
+P0=PT #현재가
+r=mean(rt)*250 #risk-free rate
+sigma5=sd(rt)*sqrt(250) #volatility
+nextT=0.5 #6개월
+t=0 #현재시점
+K=PT #strike price(행사가)
+
+#h+
+h1=(log(P0/K)+(r+(sigma5^2))*(nextT-t))/(sigma5*sqrt(nextT-t))
+#h-
+h2=(log(P0/K)+(r-(sigma5^2))*(nextT-t))/(sigma5*sqrt(nextT-t))
+Ct=P0*pnorm(h1)-K*exp(-r*(nextT-t))*pnorm(h2)
+
+#공정한 현재가
+fair_price=PT+Ct
+fair_price
+```
+### 6. 민지가 보내준 pdf 참고
+
+
+## A7. Simulation for GARCH and GJR-GARCH
+### 1. 위 A5-1에서 추정된 AR(0)+GARCH(1,1)과 AR(0)+GJR-GARCH(1,1) 모수를 이용하여 추정된 모형을 참모형으로 간주하고, rt, t=1,...,n, n=1000을 simulate 하여라. 그 후 각 모형별로 skewness를 계산하여라.
+AR(0)+GARCH(1,1) with 정규분포
+```{r}
+set.seed(2022)
+sim1=ugarchsim(garch.fit1, n.sim=1000, m.sim=1, n.start=0)
+sim.dt1=sigma(sim1)
+skewness(sim.dt1)
+```
+AR(0)+GARCH(1,1) with 표준화 t-분포
+```{r}
+set.seed(2022)
+sim2=ugarchsim(garch.fit2, n.sim=1000, m.sim=1, n.start=0)
+sim.dt2=sigma(sim2)
+skewness(sim.dt2)
+```
+AR(0)+GJR-GARCH(1,1) with 정규분포
+```{r}
+set.seed(2022)
+sim3=ugarchsim(garch.fit3, n.sim=1000, m.sim=1, n.start=0)
+sim.dt3=sigma(sim3)
+skewness(sim.dt3)
+```
+AR(0)+GJR-GARCH(1,1) with 표준화 t-분포
+```{r}
+set.seed(2022)
+sim4=ugarchsim(garch.fit4, n.sim=1000, m.sim=1, n.start=0)
+sim.dt4=sigma(sim4)
+skewness(sim.dt4)
+```
+
+### 2. 위 1을 500번 반복하여 skewness의 평균을 구하여라.
+AR(0)+GARCH(1,1) with 정규분포
+```{r}
+set.seed(2022)
+sim.skew1=c()
+for(i in 1:500){
+  sim1=ugarchsim(garch.fit1, n.sim=1000, m.sim=1, n.start=0)
+  sim.dt1=sigma(sim1)
+  sim.skew1[i]=skewness(sim.dt1)
+}
+mean(sim.skew1)
+```
+AR(0)+GARCH(1,1) with 표준화 t-분포
+```{r}
+set.seed(2022)
+sim.skew2=c()
+for(i in 1:500){
+  sim2=ugarchsim(garch.fit2, n.sim=1000, m.sim=1, n.start=0)
+  sim.dt2=sigma(sim2)
+  sim.skew2[i]=skewness(sim.dt2)
+}
+mean(sim.skew2)
+```
+AR(0)+GJR-GARCH(1,1) with 정규분포
+```{r}
+set.seed(2022)
+sim.skew3=c()
+for(i in 1:500){
+  sim3=ugarchsim(garch.fit3, n.sim=1000, m.sim=1, n.start=0)
+  sim.dt3=sigma(sim3)
+  sim.skew3[i]=skewness(sim.dt3)
+}
+mean(sim.skew3)
+```
+AR(0)+GJR-GARCH(1,1) with 표준화 t-분포
+```{r}
+set.seed(2022)
+sim.skew4=c()
+for(i in 1:500){
+  sim4=ugarchsim(garch.fit4, n.sim=1000, m.sim=1, n.start=0)
+  sim.dt4=sigma(sim4)
+  sim.skew4[i]=skewness(sim.dt4)
+}
+mean(sim.skew4)
+```
+### 3. 위 2의 결과에 대해 간략한 토론을 하여라.
+
